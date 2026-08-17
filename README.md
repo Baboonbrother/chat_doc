@@ -1,5 +1,28 @@
 # chat_doc — Local Agent Handoff
 
+## Architecture references
+
+### Differentiable Temporal Situation Memory
+
+For the source-agnostic fragmented-information / world-state memory system, read:
+
+1. `DIFFERENTIABLE_TEMPORAL_SITUATION_MEMORY_V1.md`
+
+This document is the implementation baseline for:
+
+- Evidence sources beyond LINE, including direct user input, documents, transcripts, APIs, and other adapters.
+- Atomic Situation Frames with explicit WHO / WHAT / WHEN / WHERE / OBJECT slots.
+- Explicit UNKNOWN / AMBIGUOUS / CONFLICTING semantics.
+- Append-only Slot Delta history and bitemporal reconstruction.
+- Entity / Frame resolution, bounded Context Bundles, and local LLM structured-output gateways.
+- Reconciliation loops, correction memory, decision receipts, replay, and controlled self-evolution.
+- A differentiable candidate scorer / reranker that learns from corrections without mutating canonical facts.
+- Milestones M0 through M7 and the hard invariants that local coding agents must preserve.
+
+Do **not** begin with the report generator. Implement the milestones in the order defined by the design document.
+
+---
+
 ## Current task: DeepSeek V4 Flash on R9700 32GB + 64GB RAM
 
 Local coding agents must read these files in this order:
