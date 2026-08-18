@@ -101,6 +101,23 @@ def test_run_tests_reports_red_for_failing_tests(tmp_path: Path):
     assert not result.green
 
 
+def test_run_tests_is_immune_to_project_addopts(tmp_path: Path):
+    """閘門不可以被被測方的設定關掉。
+
+    真實踩過的坑：專案 pyproject 設了 addopts="-q"，run_tests 又自己帶 -q，合起來是 -qq，
+    pytest 直接不印摘要行 -> 解析出 passed=0 -> 綠色的測試被判成不綠。
+    更糟的方向是 addopts="--collect-only"：測試根本沒跑，卻可能 exit 0。
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "-qq --collect-only"\n', encoding="utf-8"
+    )
+    t = tmp_path / "test_ok.py"
+    t.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    result = run_tests([str(t)], cwd=tmp_path)
+    assert result.passed == 1, f"摘要行沒解析到: {result.summary_line!r}"
+    assert result.green
+
+
 def test_zero_tests_is_not_green(tmp_path: Path):
     """『沒有測試』不得被當成『測試通過』。"""
     t = tmp_path / "test_empty.py"

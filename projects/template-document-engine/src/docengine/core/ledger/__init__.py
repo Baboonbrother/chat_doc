@@ -277,7 +277,10 @@ def run_tests(test_paths: Iterable[str], cwd: str | Path | None = None, extra_ar
     paths = list(test_paths)
     if not paths:
         raise GateFailure("沒有指定測試路徑，無法產生 test_result")
-    cmd = ["python3", "-m", "pytest", *paths, "--tb=short", "-q", *extra_args]
+    # ``-o addopts=`` 清掉專案 ini 裡的 addopts。這不是潔癖：如果沿用專案設定，任何人只要把
+    # pyproject 的 addopts 改成 ``-qq``（摘要行消失）或 ``--collect-only``（根本沒跑），
+    # 這道閘就會靜默失效或永遠報 0 passed。閘門的行為不可以被被測方的設定左右。
+    cmd = ["python3", "-m", "pytest", "-o", "addopts=", *paths, "--tb=short", "-q", *extra_args]
     proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True, text=True)
     output = proc.stdout + proc.stderr
     summary_line = ""
