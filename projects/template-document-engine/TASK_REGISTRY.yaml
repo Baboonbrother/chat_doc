@@ -18,16 +18,16 @@ nodes:
   - {id: FND-006, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define node execution ledger"}
   - {id: FND-007, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define error taxonomy"}
   - {id: FND-008, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "CLI command shell"}
-  - {id: XLSX-001, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "Workbook loader and safety checks"}
-  - {id: XLSX-002, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Workbook topology extraction"}
-  - {id: XLSX-003, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Cell value and datatype extraction"}
-  - {id: XLSX-004, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002], title: "Merged-region extraction"}
-  - {id: XLSX-005, kind: DETERMINISTIC, status: TODO, deps: [XLSX-003], title: "Style fingerprint extraction"}
-  - {id: XLSX-006, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002], title: "Geometry extraction"}
-  - {id: XLSX-007, kind: DETERMINISTIC, status: TODO, deps: [XLSX-003], title: "Formula dependency extraction"}
-  - {id: XLSX-008, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002, XLSX-003, XLSX-004, XLSX-005, XLSX-006, XLSX-007], title: "XLSX to Document IR compiler"}
-  - {id: XLSX-009, kind: DETERMINISTIC, status: TODO, deps: [FND-002, XLSX-008], title: "XLSX renderer"}
-  - {id: XLSX-010, kind: DETERMINISTIC, status: TODO, deps: [XLSX-009], title: "XLSX round-trip golden tests"}
+  - {id: XLSX-001, kind: DETERMINISTIC, status: DONE, deps: [FND-002], title: "Workbook loader and safety checks"}
+  - {id: XLSX-002, kind: DETERMINISTIC, status: DONE, deps: [XLSX-001], title: "Workbook topology extraction"}
+  - {id: XLSX-003, kind: DETERMINISTIC, status: DONE, deps: [XLSX-001], title: "Cell value and datatype extraction"}
+  - {id: XLSX-004, kind: DETERMINISTIC, status: DONE, deps: [XLSX-002], title: "Merged-region extraction"}
+  - {id: XLSX-005, kind: DETERMINISTIC, status: DONE, deps: [XLSX-003], title: "Style fingerprint extraction"}
+  - {id: XLSX-006, kind: DETERMINISTIC, status: DONE, deps: [XLSX-002], title: "Geometry extraction"}
+  - {id: XLSX-007, kind: DETERMINISTIC, status: DONE, deps: [XLSX-003], title: "Formula dependency extraction"}
+  - {id: XLSX-008, kind: DETERMINISTIC, status: DONE, deps: [XLSX-002, XLSX-003, XLSX-004, XLSX-005, XLSX-006, XLSX-007], title: "XLSX to Document IR compiler"}
+  - {id: XLSX-009, kind: DETERMINISTIC, status: DONE, deps: [FND-002, XLSX-008], title: "XLSX renderer"}
+  - {id: XLSX-010, kind: DETERMINISTIC, status: DONE, deps: [XLSX-009], title: "XLSX round-trip golden tests"}
   - {id: DOCX-001, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "DOCX loader and package safety checks"}
   - {id: DOCX-002, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Section and page setup extraction"}
   - {id: DOCX-003, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Paragraph and run extraction"}
