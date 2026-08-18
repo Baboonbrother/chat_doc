@@ -27,21 +27,36 @@ where python-docx does not expose enough detail」。把「精確」蓋在一個
 
 ---
 
-## AD-002 — Golden fixture 由 LibreOffice 產生，不得由本專案的 renderer 產生
+## AD-002 — Golden fixture 不得由本專案的 renderer 產生（原訂 LibreOffice 路線已因環境受阻，改雙軌）
 
 **脈絡.** round-trip 測試是 `parse → IR → render → parse → diff`。如果 fixture 本身是我們的 renderer
 寫出來的，這個測試只證明「我們的 renderer 和我們的 parser 互相自洽」，證明不了 parser 讀得懂真正的
 Excel/Word。那是一個看起來全綠的空心閘。
 
-**決定.** `fixtures/xlsx/` 與 `fixtures/docx/` 底下的 `.xlsx` / `.docx` 一律由 LibreOffice（本機
-24.2.7.2）從 `tools/make_fixtures/*.fods` / `*.fodt` 這類 flat-XML 來源轉出，或由手寫的原始 OOXML 打包
-而成——兩條路都獨立於本專案的 renderer。產生指令記在 `fixtures/MANIFEST.md`，可重現。
+**原訂決定.** 用 LibreOffice 把手寫的 ODF 轉成 `.xlsx` / `.docx`。
 
-`ARCHITECTURE.md` §5 說「Do not use LibreOffice as the core parser」。本決定不違反：LibreOffice 只當
-fixture 生產者，不在執行路徑上。
+**實測受阻.** 本機 LibreOffice 24.2.7.2 只裝了 `libreoffice-writer` 與 `libreoffice-math`，
+**沒有 `libreoffice-calc`**。任何試算表載入都失敗（`Error: source file could not be loaded`），
+先前 `.fods` 被誤判成 Writer 文件也是同一個原因。DOCX 那一側則不受影響，Writer 可用。
 
-**代價.** fixture 重生成需要 LibreOffice；CI 若沒有它就只能用已 commit 的二進位 fixture。因此 fixture
-檔案本身要進版控，並標記 `@pytest.mark.libreoffice` 區隔「重新生成」與「讀取既有 fixture」兩種測試。
+**改後決定（雙軌）.**
+
+1. **進版控的 fixture**：由 `tools/make_fixtures/build_xlsx_fixture.py` 直接寫出原始 OOXML。
+   它是一份**獨立於 renderer 的產生器**：刻意採用 Excel 的編碼慣例而非我們 renderer 的偏好——
+   sharedStrings 索引式字串、`inlineStr`、稀疏欄位（跳過空格）、非連續的樣式索引、`spans` 屬性、
+   `t="b"`／`t="e"`、`cols` 用 min/max 區段，並刻意放入 `definedNames` 與 `conditionalFormatting`
+   兩個我們**不打算建模**的元素，用來證明未支援登記簿（AD-004）真的會觸發。
+2. **不進版控的真實語料**：本機有 49 份由 Microsoft Excel 產生的真實 `.xlsx`。
+   `tests/test_xlsx_real_corpus.py` 會在環境變數 `DOCENGINE_REAL_XLSX_DIR` 指到目錄時，
+   對它們跑 parse → render → parse → diff。**這些檔案含公務與個人資料，而本 repo 是公開的，
+   因此絕對不進版控**；沒設環境變數時測試 skip。
+
+**代價.** 進版控那一軌的「第三方性」比原訂弱：產生器仍是我寫的，可能無意識地只寫出我的 parser 看得懂的
+形狀。真正的第三方保證來自第二軌，但它不可重現於 CI。要把兩者合一，需要
+`sudo apt install libreoffice-calc`（系統變更，需 owner 同意）。
+
+**怎麼推翻.** 裝上 `libreoffice-calc` 後，把 fixture 產生器改回 ODF→XLSX 轉檔路線
+（該版程式碼保留在本 commit 的 git 歷史裡），並讓兩軌都跑。
 
 ---
 
@@ -68,6 +83,58 @@ part、XML 路徑、元素名稱與計數。round-trip 報告必須把它印出�
 「explicitly declare tolerances and unsupported OOXML features」由此滿足。
 
 **代價.** parser 每個分支都要多寫一段「其餘記到登記簿」，而且登記簿本身會參與 diff。
+
+---
+
+## AD-007 — renderer 依「原始子元素序列」組裝，不依 schema 順序表
+
+**脈絡.** 第一版 renderer 把每個 part 的內容收集成「標籤 → XML 區塊」的字典，再依 OOXML schema
+的順序表輸出。拿 40 份真實 Microsoft Excel 檔一跑，33 份重建後壞掉或少東西。
+
+兩個原因，都是靜默遺失：
+
+1. **順序表上沒有的標籤會被丟掉。** `mc:AlternateContent` 不在 `CT_Workbook` 的 sequence 裡
+   （它是 markup-compatibility 的東西，可以出現在任何位置），於是整段消失。
+2. **同名元素會互相覆蓋。** 一張工作表可以有多個 `conditionalFormatting`；用標籤當字典鍵，
+   只會留下最後一個。
+
+**決定.** parser 額外記錄每個 part 的原始子元素標籤序列（`child_sequence`），renderer 依它組裝：
+逐一走過原始順序，遇到已建模的標籤就輸出我們重建的區塊，遇到逐字保留的就依序取出。
+沒有 `child_sequence`（程式合成的新文件）才退回 schema 順序表。最後還有一道兜底：
+任何沒被輸出的片段一律補在尾端——寧可順序不完美，也不要靜默少東西。
+
+**代價.** `child_sequence` 是 IR 的一部分，會參與 diff，所以「元素順序變了」也會讓 round-trip 轉紅。
+這是想要的行為，但它讓 IR 對格式細節更敏感。
+
+---
+
+## AD-008 — 「選配元素」不得無中生有
+
+**脈絡.** `<dimension>`（涵蓋範圍）與 `<workbookPr>` 都是選配的。renderer 一律產生它們，
+於是來源沒有的檔案在重建後多出東西，round-trip 因為「我們自己加的」而轉紅。
+`workbookPr` 更糟：真實檔案的它帶著 `defaultThemeVersion` 等我們不理解的屬性，
+我們用一個只有 `date1904` 的版本覆蓋過去，等於靜默改寫。
+
+**決定.** 選配元素只在來源本來就有時才輸出。`workbookPr` 從「已建模」降級為「逐字保留」——
+我們只從它**讀**出 `date1904`，不重寫它。`dimension` 相反：它是純衍生資訊，來源有就重算後輸出，
+來源沒有就不生。
+
+**代價.** renderer 多了「來源有沒有這個元素」的分支；合成新文件時要自己決定要不要產生它們。
+
+---
+
+## AD-009 — 未支援登記的數量必須參與比對
+
+**脈絡.** diff 一開始用 `(part, element)` 當未支援登記的比對鍵。實測時出現一個 diff 說「相等」、
+獨立的結構雜湊卻說「不同」的案例：來源有 11 筆富文字、重建後剩 10 筆，而 diff 完全看不見。
+
+**決定.** 比對鍵加入 `count` 與 `note`。同時 round-trip 的 `passed` 要求 **diff 相等且結構雜湊相同**——
+兩個獨立證據，避免把驗證全押在 diff 的實作上。這次就是雜湊救了 diff。
+
+**附帶發現.** 那個 11 vs 10 的差距本身不是遺失：字串池裡有沒被任何儲存格引用的舊項目，
+renderer 只寫出被引用到的。於是登記量改成「IR 實際承載幾格富文字」，
+而「丟掉幾筆無人引用的字串」則記進 `metadata.normalizations` 並印在 round-trip 報告的
+「已宣告的正規化」段——刻意的改變要講出來，不能讓使用者自己發現檔案變小了。
 
 ---
 

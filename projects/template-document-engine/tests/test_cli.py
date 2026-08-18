@@ -35,9 +35,20 @@ def test_pending_nodes_reference_real_registry_nodes():
 
 
 def test_ledger_ready_lists_actionable_nodes(capsys):
+    """列出的每個節點，依賴都必須真的已經 DONE——否則 ready 這個字就沒有意義。"""
+    from docengine.cli.main import DEFAULT_REGISTRY
+    from docengine.core.ledger import TaskRegistry
+
     assert main(["ledger", "ready"]) == 0
     out = capsys.readouterr().out
-    assert "FND-" in out or "沒有 READY 節點" in out
+    registry = TaskRegistry.from_file(DEFAULT_REGISTRY)
+    expected = registry.ready()
+    if not expected:
+        assert "沒有 READY 節點" in out
+        return
+    for node in expected:
+        assert node.id in out
+        assert registry.unmet_deps(node.id) == []
 
 
 def test_ledger_check_runs_and_reports(capsys):
