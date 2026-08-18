@@ -35,6 +35,7 @@ PENDING_NODES = {
     "generate": "GEN-010",
     "validate": "VAL-010",
     "benchmark": "LLM-010",
+    "models": "LLM-002",
 }
 
 
@@ -164,7 +165,10 @@ def cmd_ledger(args: argparse.Namespace) -> int:
 
 def cmd_models(args: argparse.Namespace) -> int:
     """列出設定裡的模型別名與實際 model id，並選擇性地探測可用性。"""
-    from docengine.llm.config import load_model_config
+    try:
+        from docengine.llm.config import load_model_config
+    except ModuleNotFoundError as exc:  # LLM 層尚未實作
+        raise NotImplementedYet("models", PENDING_NODES["models"]) from exc
 
     config = load_model_config(args.config)
     print(f"設定檔: {config.source_path or '（內建預設）'}")
