@@ -1,0 +1,104 @@
+project: template-document-engine
+version: 0.1-blueprint
+status_values: [TODO, READY, IN_PROGRESS, BLOCKED, DONE]
+done_requires: [implementation_files, tests, test_result, commit_sha_or_worktree_diff, evidence_notes]
+rules:
+  - depends_on must be DONE before starting
+  - DETERMINISTIC nodes must not call LLM
+  - LLM nodes must use Local LLM Gateway
+  - HYBRID nodes use bounded LLM proposal plus deterministic validation
+  - preserve UNKNOWN/REVIEW; never invent certainty
+  - DONE requires all acceptance criteria from architecture/acceptance docs plus node-specific tests
+nodes:
+  - {id: FND-001, kind: DETERMINISTIC, status: TODO, deps: [], title: "Define repository and package skeleton"}
+  - {id: FND-002, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define Document IR contract"}
+  - {id: FND-003, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "Define Template Profile contract"}
+  - {id: FND-004, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define Canonical Data contract"}
+  - {id: FND-005, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define evidence and decision record contracts"}
+  - {id: FND-006, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define node execution ledger"}
+  - {id: FND-007, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define error taxonomy"}
+  - {id: FND-008, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "CLI command shell"}
+  - {id: XLSX-001, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "Workbook loader and safety checks"}
+  - {id: XLSX-002, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Workbook topology extraction"}
+  - {id: XLSX-003, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Cell value and datatype extraction"}
+  - {id: XLSX-004, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002], title: "Merged-region extraction"}
+  - {id: XLSX-005, kind: DETERMINISTIC, status: TODO, deps: [XLSX-003], title: "Style fingerprint extraction"}
+  - {id: XLSX-006, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002], title: "Geometry extraction"}
+  - {id: XLSX-007, kind: DETERMINISTIC, status: TODO, deps: [XLSX-003], title: "Formula dependency extraction"}
+  - {id: XLSX-008, kind: DETERMINISTIC, status: TODO, deps: [XLSX-002, XLSX-003, XLSX-004, XLSX-005, XLSX-006, XLSX-007], title: "XLSX to Document IR compiler"}
+  - {id: XLSX-009, kind: DETERMINISTIC, status: TODO, deps: [FND-002, XLSX-008], title: "XLSX renderer"}
+  - {id: XLSX-010, kind: DETERMINISTIC, status: TODO, deps: [XLSX-009], title: "XLSX round-trip golden tests"}
+  - {id: DOCX-001, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "DOCX loader and package safety checks"}
+  - {id: DOCX-002, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Section and page setup extraction"}
+  - {id: DOCX-003, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Paragraph and run extraction"}
+  - {id: DOCX-004, kind: DETERMINISTIC, status: TODO, deps: [DOCX-003], title: "Paragraph/run style extraction"}
+  - {id: DOCX-005, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Table structure extraction"}
+  - {id: DOCX-006, kind: DETERMINISTIC, status: TODO, deps: [DOCX-003], title: "Numbering/list extraction"}
+  - {id: DOCX-007, kind: DETERMINISTIC, status: TODO, deps: [DOCX-001], title: "Field/header/footer extraction"}
+  - {id: DOCX-008, kind: DETERMINISTIC, status: TODO, deps: [DOCX-002, DOCX-003, DOCX-004, DOCX-005, DOCX-006, DOCX-007], title: "DOCX to Document IR compiler"}
+  - {id: DOCX-009, kind: DETERMINISTIC, status: TODO, deps: [DOCX-008], title: "DOCX renderer"}
+  - {id: DOCX-010, kind: DETERMINISTIC, status: TODO, deps: [DOCX-009], title: "DOCX round-trip golden tests"}
+  - {id: TPL-001, kind: DETERMINISTIC, status: TODO, deps: [FND-003], title: "Sample corpus manifest"}
+  - {id: TPL-002, kind: HYBRID, status: TODO, deps: [TPL-001, XLSX-008, DOCX-008], title: "Cross-sample structural alignment"}
+  - {id: TPL-003, kind: HYBRID, status: TODO, deps: [TPL-002], title: "Constant vs variable token detection"}
+  - {id: TPL-004, kind: HYBRID, status: TODO, deps: [TPL-002], title: "Repeated table/list region inference"}
+  - {id: TPL-005, kind: HYBRID, status: TODO, deps: [TPL-003, TPL-004], title: "Candidate field boundary extraction"}
+  - {id: TPL-006, kind: LLM, status: TODO, deps: [TPL-005, LLM-004], title: "Field semantic inference"}
+  - {id: TPL-007, kind: LLM, status: TODO, deps: [TPL-006], title: "Field relation inference"}
+  - {id: TPL-008, kind: LLM, status: TODO, deps: [TPL-003, LLM-004], title: "Language pattern mining"}
+  - {id: TPL-009, kind: HYBRID, status: TODO, deps: [XLSX-007, TPL-005], title: "Calculation rule inference"}
+  - {id: TPL-010, kind: DETERMINISTIC, status: TODO, deps: [TPL-003, TPL-004, XLSX-005, DOCX-004], title: "Rendering rule synthesis"}
+  - {id: TPL-011, kind: HYBRID, status: TODO, deps: [TPL-006, TPL-007, TPL-008, TPL-009, TPL-010], title: "Template Profile compiler"}
+  - {id: TPL-012, kind: DETERMINISTIC, status: TODO, deps: [TPL-011], title: "Human correction patch format"}
+  - {id: LLM-001, kind: DETERMINISTIC, status: TODO, deps: [FND-005], title: "Local LLM gateway contract"}
+  - {id: LLM-002, kind: DETERMINISTIC, status: TODO, deps: [LLM-001], title: "OpenAI-compatible HTTP client"}
+  - {id: LLM-003, kind: DETERMINISTIC, status: TODO, deps: [LLM-002], title: "Qwen 27B adapter configuration"}
+  - {id: LLM-004, kind: DETERMINISTIC, status: TODO, deps: [LLM-002], title: "ORINTH 9B adapter configuration"}
+  - {id: LLM-005, kind: HYBRID, status: TODO, deps: [LLM-001], title: "Structured JSON output enforcement"}
+  - {id: LLM-006, kind: DETERMINISTIC, status: TODO, deps: [LLM-005], title: "Prompt/task registry"}
+  - {id: LLM-007, kind: DETERMINISTIC, status: TODO, deps: [LLM-006], title: "Context packer"}
+  - {id: LLM-008, kind: DETERMINISTIC, status: TODO, deps: [LLM-002], title: "Retry and timeout policy"}
+  - {id: LLM-009, kind: DETERMINISTIC, status: TODO, deps: [TPL-005], title: "Semantic field benchmark dataset"}
+  - {id: LLM-010, kind: DETERMINISTIC, status: TODO, deps: [LLM-009, LLM-003, LLM-004], title: "Field mapping benchmark"}
+  - {id: LLM-011, kind: DETERMINISTIC, status: TODO, deps: [TPL-008, LLM-003, LLM-004], title: "Language pattern benchmark"}
+  - {id: LLM-012, kind: HYBRID, status: TODO, deps: [LLM-010, LLM-011], title: "Model router"}
+  - {id: LLM-013, kind: HYBRID, status: TODO, deps: [LLM-010, LLM-011], title: "Confidence calibration policy"}
+  - {id: LLM-014, kind: LLM, status: TODO, deps: [LLM-012], title: "Dual-model disagreement mode"}
+  - {id: LLM-015, kind: HYBRID, status: TODO, deps: [LLM-013, LLM-014], title: "Fallback and escalation policy"}
+  - {id: ING-001, kind: DETERMINISTIC, status: TODO, deps: [FND-004], title: "Input type detector"}
+  - {id: ING-002, kind: DETERMINISTIC, status: TODO, deps: [ING-001], title: "Structured input extractor"}
+  - {id: ING-003, kind: DETERMINISTIC, status: TODO, deps: [ING-001, XLSX-008, DOCX-008], title: "Document input extractor"}
+  - {id: ING-004, kind: LLM, status: TODO, deps: [ING-002, ING-003, LLM-005], title: "Entity and value extraction"}
+  - {id: ING-005, kind: DETERMINISTIC, status: TODO, deps: [ING-004], title: "Datatype normalization"}
+  - {id: ING-006, kind: HYBRID, status: TODO, deps: [ING-005, TPL-006, LLM-012], title: "Canonical Data mapping"}
+  - {id: ING-007, kind: DETERMINISTIC, status: TODO, deps: [ING-006, FND-003], title: "Missing required field detector"}
+  - {id: ING-008, kind: HYBRID, status: TODO, deps: [ING-006], title: "Contradiction detector"}
+  - {id: ING-009, kind: DETERMINISTIC, status: TODO, deps: [ING-007, ING-008], title: "Canonical Data validator"}
+  - {id: GEN-001, kind: DETERMINISTIC, status: TODO, deps: [TPL-011], title: "Template selector"}
+  - {id: GEN-002, kind: HYBRID, status: TODO, deps: [GEN-001, ING-009, LLM-012], title: "Field binding planner"}
+  - {id: GEN-003, kind: DETERMINISTIC, status: TODO, deps: [GEN-002], title: "Required-field gate"}
+  - {id: GEN-004, kind: DETERMINISTIC, status: TODO, deps: [GEN-003, TPL-009], title: "Derived-field calculator"}
+  - {id: GEN-005, kind: DETERMINISTIC, status: TODO, deps: [GEN-004, TPL-004], title: "Repeat-region materializer"}
+  - {id: GEN-006, kind: DETERMINISTIC, status: TODO, deps: [GEN-004, TPL-008], title: "Language pattern renderer"}
+  - {id: GEN-007, kind: LLM, status: TODO, deps: [GEN-006, LLM-015], title: "Controlled free-text generator"}
+  - {id: GEN-008, kind: DETERMINISTIC, status: TODO, deps: [GEN-005, GEN-006, GEN-007], title: "Generation Document IR assembler"}
+  - {id: GEN-009, kind: DETERMINISTIC, status: TODO, deps: [GEN-008, XLSX-009, DOCX-009], title: "Output renderer router"}
+  - {id: GEN-010, kind: DETERMINISTIC, status: TODO, deps: [GEN-009], title: "Generation manifest"}
+  - {id: VAL-001, kind: DETERMINISTIC, status: TODO, deps: [GEN-008], title: "Schema validation"}
+  - {id: VAL-002, kind: DETERMINISTIC, status: TODO, deps: [GEN-008], title: "Content completeness validation"}
+  - {id: VAL-003, kind: DETERMINISTIC, status: TODO, deps: [GEN-009], title: "XLSX structural validator"}
+  - {id: VAL-004, kind: DETERMINISTIC, status: TODO, deps: [GEN-009], title: "DOCX structural validator"}
+  - {id: VAL-005, kind: DETERMINISTIC, status: TODO, deps: [GEN-009], title: "Style fingerprint validator"}
+  - {id: VAL-006, kind: HYBRID, status: TODO, deps: [GEN-007, TPL-008], title: "Language terminology validator"}
+  - {id: VAL-007, kind: HYBRID, status: TODO, deps: [GEN-008, ING-009], title: "Semantic consistency validator"}
+  - {id: VAL-008, kind: DETERMINISTIC, status: TODO, deps: [GEN-009, XLSX-010, DOCX-010], title: "Round-trip artifact validator"}
+  - {id: VAL-009, kind: DETERMINISTIC, status: TODO, deps: [VAL-003, VAL-004, VAL-005, VAL-006], title: "Template similarity report"}
+  - {id: VAL-010, kind: DETERMINISTIC, status: TODO, deps: [VAL-002, VAL-007, VAL-009], title: "Human review bundle"}
+  - {id: INT-001, kind: HYBRID, status: TODO, deps: [TPL-011, GEN-010, VAL-010], title: "End-to-end XLSX learn→generate test"}
+  - {id: INT-002, kind: HYBRID, status: TODO, deps: [TPL-011, GEN-010, VAL-010], title: "End-to-end DOCX learn→generate test"}
+  - {id: INT-003, kind: DETERMINISTIC, status: TODO, deps: [LLM-010, LLM-011], title: "Local model A/B harness"}
+  - {id: INT-004, kind: DETERMINISTIC, status: TODO, deps: [GEN-006], title: "Offline/no-LLM degraded mode"}
+  - {id: INT-005, kind: DETERMINISTIC, status: TODO, deps: [TPL-012], title: "Profile versioning and migration"}
+  - {id: INT-006, kind: DETERMINISTIC, status: TODO, deps: [GEN-010, FND-005], title: "Audit log and replay"}
+  - {id: INT-007, kind: DETERMINISTIC, status: TODO, deps: [FND-008, INT-001, INT-002], title: "Minimal HTTP API"}
+  - {id: INT-008, kind: DETERMINISTIC, status: TODO, deps: [INT-001, INT-002, INT-003, INT-004, INT-005, INT-006], title: "Release readiness gate"}
