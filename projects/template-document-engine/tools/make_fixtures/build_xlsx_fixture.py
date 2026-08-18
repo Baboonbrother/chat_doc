@@ -1,413 +1,326 @@
-"""XLSX golden fixture 產生器｜寫出 ODF 試算表 (.ods)，再交給 LibreOffice 轉成 .xlsx。
+"""XLSX golden fixture 產生器｜直接寫出原始 OOXML。
 
-為什麼繞這一圈：round-trip 測試若拿我們自己 renderer 寫出來的檔案當輸入，就只證明
-「我們的 renderer 和我們的 parser 互相自洽」，證明不了 parser 讀得懂真正的 Excel。
-所以 fixture 必須由一個獨立的第三方寫出來——這裡是 LibreOffice 的 XLSX 匯出器（AD-002）。
+**這支程式刻意不共用 renderer 的任何一行程式碼**（AD-002）。理由：round-trip 測試若拿我們
+renderer 寫出來的檔案當輸入，就只證明「renderer 和 parser 互相自洽」，證明不了 parser 讀得懂
+真正的 Excel。原訂做法是讓 LibreOffice 轉檔，但本機沒裝 `libreoffice-calc`，試算表一律載入失敗。
 
-fixture 刻意涵蓋 ACCEPTANCE_AND_EVIDENCE.md §2 列的難點：多工作表、隱藏工作表、
-橫向與縱向合併、公式與跨表參照、數值/日期格式、列高欄寬、隱藏列欄、凍結窗格、
-多種框線、以及筆數會變動的重複列區。
+替代做法是把 Excel 的編碼慣例寫死在這裡，而且刻意選 renderer **不會**自然產生的形式：
+
+- 字串走 sharedStrings 索引（`t="s"`），另有一格走 `inlineStr`——兩種字串編碼並存。
+- 欄位稀疏：空格直接不寫 `<c>`，而不是寫一個空的。
+- 樣式索引刻意非連續、非遞增。
+- `<row>` 帶 `spans`；`<cols>` 用 min/max 區段涵蓋多欄。
+- 布林 `t="b"`、錯誤 `t="e"`、日期以序列數字 + numFmt 表示。
+- 刻意放入 `definedNames` 與 `conditionalFormatting` 兩個**我們不建模**的元素，
+  用來證明未支援特徵登記簿（AD-004）真的會觸發，而不是一個從沒被驗證過的空 list。
+
+fixture 涵蓋 ACCEPTANCE_AND_EVIDENCE.md §2 列的難點：多工作表、隱藏工作表、橫向與縱向合併、
+公式與跨表參照、數值/日期格式、列高欄寬、隱藏列欄、凍結窗格、多種框線、筆數會變動的重複列區。
 
 io: in=無; out=fixtures/xlsx/duty_roster_sample_{1,2,3}.xlsx
-依賴: LibreOffice (soffice) 必須在 PATH 上
+依賴: 只用標準函式庫
 用法: python3 tools/make_fixtures/build_xlsx_fixture.py
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-import sys
-import tempfile
+import datetime as dt
+import zipfile
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = PROJECT_ROOT / "fixtures" / "xlsx"
 
-NS = """xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" \
-xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" \
-xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" \
-xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" \
-xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" \
-xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" \
-xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" \
-xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0" \
-xmlns:calcext="urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0\""""
+#: Excel 的日期序列原點。1900 閏年 bug 讓 1899-12-30 成為實際的第 0 天。
+EPOCH = dt.date(1899, 12, 30)
 
-STYLES = """
-  <office:automatic-styles>
-    <number:date-style style:name="N_DATE">
-      <number:year number:style="long"/><number:text>-</number:text>
-      <number:month number:style="long"/><number:text>-</number:text>
-      <number:day number:style="long"/>
-    </number:date-style>
-    <number:number-style style:name="N_INT"><number:number number:decimal-places="0" number:min-integer-digits="1"/></number:number-style>
-    <number:number-style style:name="N_DEC2"><number:number number:decimal-places="2" number:min-integer-digits="1"/></number:number-style>
-    <number:percentage-style style:name="N_PCT"><number:number number:decimal-places="1" number:min-integer-digits="1"/><number:text>%</number:text></number:percentage-style>
+MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
-    <style:style style:name="co_wide" style:family="table-column">
-      <style:table-column-properties fo:break-before="auto" style:column-width="1.4in"/>
-    </style:style>
-    <style:style style:name="co_narrow" style:family="table-column">
-      <style:table-column-properties fo:break-before="auto" style:column-width="0.5in"/>
-    </style:style>
-    <style:style style:name="co_default" style:family="table-column">
-      <style:table-column-properties fo:break-before="auto" style:column-width="0.889in"/>
-    </style:style>
+CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"""
 
-    <style:style style:name="ro_tall" style:family="table-row">
-      <style:table-row-properties style:row-height="0.45in" style:use-optimal-row-height="false"/>
-    </style:style>
-    <style:style style:name="ro_default" style:family="table-row">
-      <style:table-row-properties style:row-height="0.178in" style:use-optimal-row-height="true"/>
-    </style:style>
+ROOT_RELS = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="{REL_NS}/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
 
-    <style:style style:name="ta_visible" style:family="table"><style:table-properties table:display="true"/></style:style>
-    <style:style style:name="ta_hidden" style:family="table"><style:table-properties table:display="false"/></style:style>
+WORKBOOK_RELS = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="{REL_NS}/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="{REL_NS}/worksheet" Target="worksheets/sheet2.xml"/>
+<Relationship Id="rId3" Type="{REL_NS}/worksheet" Target="worksheets/sheet3.xml"/>
+<Relationship Id="rId4" Type="{REL_NS}/sharedStrings" Target="sharedStrings.xml"/>
+<Relationship Id="rId5" Type="{REL_NS}/styles" Target="styles.xml"/>
+</Relationships>"""
 
-    <style:style style:name="ce_title" style:family="table-cell">
-      <style:table-cell-properties fo:background-color="#dbe5f1" style:vertical-align="middle"
-        fo:border="0.06in solid #1f3864"/>
-      <style:paragraph-properties fo:text-align="center"/>
-      <style:text-properties fo:font-size="16pt" fo:font-weight="bold" style:font-name="Noto Sans CJK TC"/>
-    </style:style>
-    <style:style style:name="ce_header" style:family="table-cell">
-      <style:table-cell-properties fo:background-color="#f2f2f2"
-        fo:border-bottom="0.03in solid #000000" fo:border-top="0.01in solid #808080"
-        fo:border-left="0.01in solid #808080" fo:border-right="0.01in solid #808080"/>
-      <style:paragraph-properties fo:text-align="center"/>
-      <style:text-properties fo:font-weight="bold"/>
-    </style:style>
-    <style:style style:name="ce_label" style:family="table-cell">
-      <style:table-cell-properties fo:border-left="0.01in dashed #ff0000"/>
-      <style:text-properties fo:font-style="italic"/>
-    </style:style>
-    <style:style style:name="ce_plain" style:family="table-cell">
-      <style:table-cell-properties fo:border="0.01in solid #999999"/>
-    </style:style>
-    <style:style style:name="ce_date" style:family="table-cell" style:data-style-name="N_DATE">
-      <style:table-cell-properties fo:border="0.01in solid #999999"/>
-    </style:style>
-    <style:style style:name="ce_int" style:family="table-cell" style:data-style-name="N_INT">
-      <style:table-cell-properties fo:border="0.01in solid #999999"/>
-      <style:paragraph-properties fo:text-align="end"/>
-    </style:style>
-    <style:style style:name="ce_dec2" style:family="table-cell" style:data-style-name="N_DEC2">
-      <style:table-cell-properties fo:border="0.01in solid #999999"/>
-    </style:style>
-    <style:style style:name="ce_pct" style:family="table-cell" style:data-style-name="N_PCT">
-      <style:table-cell-properties fo:border="0.01in solid #999999"/>
-    </style:style>
-    <style:style style:name="ce_merge_v" style:family="table-cell">
-      <style:table-cell-properties fo:background-color="#fff2cc" style:vertical-align="middle"
-        fo:border="0.01in solid #bf8f00"/>
-      <style:paragraph-properties fo:text-align="center"/>
-    </style:style>
-  </office:automatic-styles>
-"""
+# definedNames 是刻意放的：我們不建模它，所以它必須出現在未支援登記簿裡。
+WORKBOOK = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="{MAIN_NS}" xmlns:r="{REL_NS}">
+<workbookPr date1904="false"/>
+<sheets>
+<sheet name="勤務表" sheetId="1" r:id="rId1"/>
+<sheet name="統計" sheetId="2" r:id="rId2"/>
+<sheet name="設定" sheetId="3" state="hidden" r:id="rId3"/>
+</sheets>
+<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'勤務表'!$A$1:$D$12</definedName></definedNames>
+</workbook>"""
 
-# 凍結窗格：ODF 放在 view settings 裡。LibreOffice 匯出 XLSX 時會轉成 <pane>。
-SETTINGS = """
-  <office:settings>
-    <config:config-item-set config:name="ooo:view-settings">
-      <config:config-item-map-indexed config:name="Views">
-        <config:config-item-map-entry>
-          <config:config-item config:name="ViewId" config:type="string">view1</config:config-item>
-          <config:config-item-map-named config:name="Tables">
-            <config:config-item-map-entry config:name="勤務表">
-              <config:config-item config:name="HorizontalSplitMode" config:type="short">2</config:config-item>
-              <config:config-item config:name="VerticalSplitMode" config:type="short">2</config:config-item>
-              <config:config-item config:name="HorizontalSplitPosition" config:type="int">1</config:config-item>
-              <config:config-item config:name="VerticalSplitPosition" config:type="int">4</config:config-item>
-              <config:config-item config:name="PositionRight" config:type="int">1</config:config-item>
-              <config:config-item config:name="PositionBottom" config:type="int">4</config:config-item>
-            </config:config-item-map-entry>
-          </config:config-item-map-named>
-        </config:config-item-map-entry>
-      </config:config-item-map-indexed>
-    </config:config-item-set>
-  </office:settings>
-"""
+# 樣式表。cellXfs 的索引就是 <c s="..."> 指到的東西。
+# 索引 0 是預設，之後刻意讓 fixture 用到 6/2/4/1/5/3 這種非遞增順序。
+STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2">
+<numFmt numFmtId="164" formatCode="0.0%"/>
+<numFmt numFmtId="165" formatCode="yyyy&quot;年&quot;m&quot;月&quot;d&quot;日&quot;"/>
+</numFmts>
+<fonts count="4">
+<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>
+<font><b/><sz val="16"/><color rgb="FF1F3864"/><name val="Noto Sans CJK TC"/></font>
+<font><b/><sz val="11"/><name val="Calibri"/></font>
+<font><i/><sz val="11"/><color rgb="FFC00000"/><name val="Calibri"/></font>
+</fonts>
+<fills count="4">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFDBE5F1"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="4">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF999999"/></left><right style="thin"><color rgb="FF999999"/></right><top style="thin"><color rgb="FF999999"/></top><bottom style="thin"><color rgb="FF999999"/></bottom><diagonal/></border>
+<border><left style="medium"><color rgb="FF1F3864"/></left><right style="medium"><color rgb="FF1F3864"/></right><top style="medium"><color rgb="FF1F3864"/></top><bottom style="medium"><color rgb="FF1F3864"/></bottom><diagonal/></border>
+<border><left style="dashed"><color rgb="FFFF0000"/></left><right/><top/><bottom style="double"><color rgb="FF000000"/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="7">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="14" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="3" xfId="0" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+</cellXfs>
+</styleSheet>"""
 
 
-def _attr(name: str) -> str:
-    """把 Python 關鍵字參數名轉回 ODF 屬性名：``table__number_columns_spanned``
-    -> ``table:number-columns-spanned``。前綴用雙底線分隔，其餘底線是連字號。"""
-    prefix, _, rest = name.partition("__")
-    return f"{prefix}:{rest.replace('_', '-')}"
+def _esc(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def _text_cell(value: str, style: str = "ce_plain", **attrs: str) -> str:
-    extra = "".join(f' {_attr(k)}="{v}"' for k, v in attrs.items())
-    return (
-        f'<table:table-cell table:style-name="{style}" office:value-type="string" '
-        f'calcext:value-type="string"{extra}><text:p>{value}</text:p></table:table-cell>'
-    )
+def _serial(iso: str) -> int:
+    return (dt.date.fromisoformat(iso) - EPOCH).days
 
 
-def _num_cell(value: float, style: str = "ce_int", **attrs: str) -> str:
-    extra = "".join(f' {_attr(k)}="{v}"' for k, v in attrs.items())
-    return (
-        f'<table:table-cell table:style-name="{style}" office:value-type="float" '
-        f'office:value="{value}" calcext:value-type="float"{extra}><text:p>{value}</text:p></table:table-cell>'
-    )
+class SharedStrings:
+    """Excel 的字串池。刻意保留插入順序與重複去除，讓索引跟真檔一樣不直觀。"""
+
+    def __init__(self) -> None:
+        self._items: list[str] = []
+        self._index: dict[str, int] = {}
+        self.total_refs = 0
+
+    def index(self, text: str) -> int:
+        self.total_refs += 1
+        if text not in self._index:
+            self._index[text] = len(self._items)
+            self._items.append(text)
+        return self._index[text]
+
+    def to_xml(self) -> str:
+        body = "".join(f"<si><t>{_esc(t)}</t></si>" for t in self._items)
+        return (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            f'<sst xmlns="{MAIN_NS}" count="{self.total_refs}" uniqueCount="{len(self._items)}">{body}</sst>'
+        )
 
 
-def _date_cell(iso: str, style: str = "ce_date") -> str:
-    return (
-        f'<table:table-cell table:style-name="{style}" office:value-type="date" '
-        f'office:date-value="{iso}" calcext:value-type="date"><text:p>{iso}</text:p></table:table-cell>'
-    )
+def _c_shared(ref: str, style: int, sst: SharedStrings, text: str) -> str:
+    return f'<c r="{ref}" s="{style}" t="s"><v>{sst.index(text)}</v></c>'
 
 
-def _formula_cell(formula: str, cached: float, style: str = "ce_int") -> str:
-    return (
-        f'<table:table-cell table:style-name="{style}" table:formula="{formula}" '
-        f'office:value-type="float" office:value="{cached}" calcext:value-type="float">'
-        f"<text:p>{cached}</text:p></table:table-cell>"
-    )
+def _c_inline(ref: str, style: int, text: str) -> str:
+    """inlineStr：Excel 偶爾會用的另一種字串編碼。parser 必須兩種都認得。"""
+    return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t>{_esc(text)}</t></is></c>'
 
 
-def _empty(n: int = 1) -> str:
-    rep = f' table:number-columns-repeated="{n}"' if n > 1 else ""
-    return f"<table:table-cell{rep}/>"
+def _c_num(ref: str, style: int, value: float) -> str:
+    return f'<c r="{ref}" s="{style}"><v>{value}</v></c>'
 
 
-def _covered(n: int = 1) -> str:
-    rep = f' table:number-columns-repeated="{n}"' if n > 1 else ""
-    return f"<table:covered-table-cell{rep}/>"
+def _c_date(ref: str, style: int, iso: str) -> str:
+    return f'<c r="{ref}" s="{style}"><v>{_serial(iso)}</v></c>'
 
 
-def build_fods(sample_no: int, staff: list[tuple[str, str, int, float]], report_date: str) -> str:
-    """組出一份 .fods。三份樣本共用版面，只有值與人員筆數不同。"""
+def _c_bool(ref: str, style: int, value: bool) -> str:
+    return f'<c r="{ref}" s="{style}" t="b"><v>{1 if value else 0}</v></c>'
+
+
+def _c_error(ref: str, style: int, code: str) -> str:
+    return f'<c r="{ref}" s="{style}" t="e"><v>{code}</v></c>'
+
+
+def _c_formula(ref: str, style: int, formula: str, cached: float) -> str:
+    return f'<c r="{ref}" s="{style}"><f>{_esc(formula)}</f><v>{cached}</v></c>'
+
+
+def build_sheet1(staff: list[tuple[str, str, int, float]], report_date: str, sample_no: int, sst: SharedStrings) -> str:
+    first_staff_row = 5
+    last_staff_row = 4 + len(staff)
+    total_row = last_staff_row + 1
+    total_hours = sum(s[2] for s in staff)
+    zone = staff[0][0]
+
     rows: list[str] = []
 
-    # 第 1 列：標題，橫向合併 A1:D1
+    # 第 1 列：標題（A1:D1 橫向合併）。ht/customHeight 是列高證據。
     rows.append(
-        '<table:table-row table:style-name="ro_tall">'
-        + _text_cell(
-            f"臺北市政府警察局　勤務分配表（第 {sample_no} 版）",
-            "ce_title",
-            table__number_columns_spanned="4",
-            table__number_rows_spanned="1",
-        )
-        + _covered(3)
-        + "</table:table-row>"
+        f'<row r="1" spans="1:4" ht="33" customHeight="1">'
+        + _c_shared("A1", 6, sst, f"臺北市政府警察局　勤務分配表（第 {sample_no} 版）")
+        + "</row>"
     )
-
-    # 第 2 列：報表日期 + 隱藏欄 D 裡的內部註記
+    # 第 2 列：日期 + 隱藏欄 D 的內部註記。B2 用內建日期格式 14，D2 走 inlineStr。
     rows.append(
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("報表日期", "ce_label")
-        + _date_cell(report_date)
-        + _empty()
-        + _text_cell(f"internal-{sample_no}", "ce_plain")
-        + "</table:table-row>"
+        '<row r="2" spans="1:4">'
+        + _c_shared("A2", 5, sst, "報表日期")
+        + _c_date("B2", 2, report_date)
+        + _c_inline("D2", 4, f"internal-{sample_no}")
+        + "</row>"
     )
-
-    # 第 3 列：隱藏列（內部備註，不該出現在列印版但必須被解析到）
+    # 第 3 列：隱藏列。C3 是布林、D3 是錯誤值——兩種少見但合法的 cell type。
     rows.append(
-        '<table:table-row table:style-name="ro_default" table:visibility="collapse">'
-        + _text_cell("內部備註", "ce_label")
-        + _text_cell(f"這一列是隱藏的（sample {sample_no}）", "ce_plain")
-        + _empty(2)
-        + "</table:table-row>"
+        '<row r="3" spans="1:4" hidden="1">'
+        + _c_shared("A3", 5, sst, "內部備註")
+        + _c_shared("B3", 4, sst, f"這一列是隱藏的（sample {sample_no}）")
+        + _c_bool("C3", 4, True)
+        + _c_error("D3", 4, "#N/A")
+        + "</row>"
     )
-
     # 第 4 列：表頭
     rows.append(
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("勤區", "ce_header")
-        + _text_cell("姓名", "ce_header")
-        + _text_cell("時數", "ce_header")
-        + _text_cell("完成率", "ce_header")
-        + "</table:table-row>"
+        '<row r="4" spans="1:4">'
+        + "".join(_c_shared(f"{col}4", 1, sst, label) for col, label in zip("ABCD", ("勤區", "姓名", "時數", "完成率")))
+        + "</row>"
     )
-
-    # 第 5 列起：重複列區（筆數三份樣本各不同），A 欄縱向合併整個區塊
-    for idx, (zone, name, hours, rate) in enumerate(staff):
-        cells = []
-        if idx == 0:
-            cells.append(
-                _text_cell(
-                    zone,
-                    "ce_merge_v",
-                    table__number_columns_spanned="1",
-                    table__number_rows_spanned=str(len(staff)),
-                )
-            )
-        else:
-            cells.append(_covered())
-        cells.append(_text_cell(name, "ce_plain"))
-        cells.append(_num_cell(hours, "ce_int"))
-        cells.append(_num_cell(rate, "ce_pct"))
-        rows.append('<table:table-row table:style-name="ro_default">' + "".join(cells) + "</table:table-row>")
-
-    # 合計列：同表 SUM 公式
-    first = 5
-    last = 4 + len(staff)
-    total = sum(s[2] for s in staff)
+    # 重複列區：A 欄縱向合併整區，只有第一列有值，其餘不寫 <c>（稀疏）。
+    for i, (_zone, name, hours, rate) in enumerate(staff):
+        r = first_staff_row + i
+        cells = [_c_shared(f"A{r}", 4, sst, zone)] if i == 0 else []
+        cells.append(_c_shared(f"B{r}", 4, sst, name))
+        cells.append(_c_num(f"C{r}", 4, hours))
+        cells.append(_c_num(f"D{r}", 3, round(rate / 100, 4)))
+        rows.append(f'<row r="{r}" spans="1:4">' + "".join(cells) + "</row>")
+    # 合計列：同表 SUM
     rows.append(
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("合計", "ce_header")
-        + _empty()
-        + _formula_cell(f"of:=SUM([.C{first}:.C{last}])", total, "ce_int")
-        + _empty()
-        + "</table:table-row>"
+        f'<row r="{total_row}" spans="1:4">'
+        + _c_shared(f"A{total_row}", 1, sst, "合計")
+        + _c_formula(f"C{total_row}", 4, f"SUM(C{first_staff_row}:C{last_staff_row})", total_hours)
+        + "</row>"
     )
 
-    duty_rows = "".join(rows)
-
-    # 第二張表：跨表參照 + 兩位小數
-    avg = round(sum(s[2] for s in staff) / len(staff), 2)
-    stats_rows = (
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("項目", "ce_header")
-        + _text_cell("數值", "ce_header")
-        + "</table:table-row>"
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("總時數（跨表）", "ce_plain")
-        + _formula_cell(f"of:=[$'勤務表'.C{last + 1}]", total, "ce_int")
-        + "</table:table-row>"
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("平均時數", "ce_plain")
-        + _num_cell(avg, "ce_dec2")
-        + "</table:table-row>"
-    )
-
-    # 第三張表：隱藏工作表
-    config_rows = (
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("設定鍵", "ce_header")
-        + _text_cell("值", "ce_header")
-        + "</table:table-row>"
-        '<table:table-row table:style-name="ro_default">'
-        + _text_cell("template_version", "ce_plain")
-        + _text_cell(f"v{sample_no}", "ce_plain")
-        + "</table:table-row>"
-    )
-
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<office:document-content {NS} office:version="1.2">
-{STYLES}
-  <office:body>
-    <office:spreadsheet>
-      <table:table table:name="勤務表" table:style-name="ta_visible">
-        <table:table-column table:style-name="co_wide"/>
-        <table:table-column table:style-name="co_default"/>
-        <table:table-column table:style-name="co_narrow"/>
-        <table:table-column table:style-name="co_default" table:visibility="collapse"/>
-        {duty_rows}
-      </table:table>
-      <table:table table:name="統計" table:style-name="ta_visible">
-        <table:table-column table:style-name="co_wide"/>
-        <table:table-column table:style-name="co_default"/>
-        {stats_rows}
-      </table:table>
-      <table:table table:name="設定" table:style-name="ta_hidden">
-        <table:table-column table:style-name="co_default" table:number-columns-repeated="2"/>
-        {config_rows}
-      </table:table>
-    </office:spreadsheet>
-  </office:body>
-</office:document-content>
-"""
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="{MAIN_NS}" xmlns:r="{REL_NS}">
+<dimension ref="A1:D{total_row}"/>
+<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane xSplit="1" ySplit="4" topLeftCell="B5" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols><col min="1" max="1" width="18.5" customWidth="1"/><col min="2" max="2" width="12" customWidth="1"/><col min="3" max="3" width="7.25" customWidth="1"/><col min="4" max="4" width="9.140625" hidden="1" customWidth="1"/></cols>
+<sheetData>{''.join(rows)}</sheetData>
+<mergeCells count="2"><mergeCell ref="A1:D1"/><mergeCell ref="A{first_staff_row}:A{last_staff_row}"/></mergeCells>
+<conditionalFormatting sqref="C{first_staff_row}:C{last_staff_row}"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThan"><formula>7</formula></cfRule></conditionalFormatting>
+<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>"""
 
 
-MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
-<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
-  <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
-  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
-  <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
-  <manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="text/xml"/>
-  <manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>
-</manifest:manifest>
-"""
-
-STYLES_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
-<office:document-styles {NS} office:version="1.2">
-  <office:styles/>
-  <office:automatic-styles/>
-  <office:master-styles/>
-</office:document-styles>
-"""
-
-SETTINGS_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
-<office:document-settings {NS} office:version="1.2">
-{SETTINGS}
-</office:document-settings>
-"""
-
-META_XML = f"""<?xml version="1.0" encoding="UTF-8"?>
-<office:document-meta {NS} xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" office:version="1.2">
-  <office:meta><meta:generator>docengine-fixture-builder</meta:generator></office:meta>
-</office:document-meta>
-"""
+def build_sheet2(staff: list[tuple[str, str, int, float]], sst: SharedStrings) -> str:
+    total = sum(s[2] for s in staff)
+    avg = round(total / len(staff), 2)
+    duty_total_row = 5 + len(staff)
+    rows = [
+        '<row r="1" spans="1:2">'
+        + _c_shared("A1", 1, sst, "項目")
+        + _c_shared("B1", 1, sst, "數值")
+        + "</row>",
+        '<row r="2" spans="1:2">'
+        + _c_shared("A2", 4, sst, "總時數（跨表）")
+        + _c_formula("B2", 4, f"勤務表!C{duty_total_row}", total)
+        + "</row>",
+        '<row r="3" spans="1:2">' + _c_shared("A3", 4, sst, "平均時數") + _c_num("B3", 4, avg) + "</row>",
+    ]
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="{MAIN_NS}" xmlns:r="{REL_NS}">
+<dimension ref="A1:B3"/>
+<sheetViews><sheetView workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols><col min="1" max="1" width="18.5" customWidth="1"/><col min="2" max="2" width="12" customWidth="1"/></cols>
+<sheetData>{''.join(rows)}</sheetData>
+<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>"""
 
 
-def write_ods(path: Path, content_xml: str) -> None:
-    """組出一個合法的 ODF 封裝。
+def build_sheet3(sample_no: int, sst: SharedStrings) -> str:
+    rows = [
+        '<row r="1" spans="1:2">' + _c_shared("A1", 1, sst, "設定鍵") + _c_shared("B1", 1, sst, "值") + "</row>",
+        '<row r="2" spans="1:2">'
+        + _c_shared("A2", 4, sst, "template_version")
+        + _c_shared("B2", 4, sst, f"v{sample_no}")
+        + "</row>",
+    ]
+    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="{MAIN_NS}" xmlns:r="{REL_NS}">
+<dimension ref="A1:B2"/>
+<sheetViews><sheetView workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols><col min="1" max="2" width="16" customWidth="1"/></cols>
+<sheetData>{''.join(rows)}</sheetData>
+<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>"""
 
-    ``mimetype`` 必須是 zip 的第一個項目且不壓縮——這是 ODF 規範用來讓檔案類型偵測
-    只讀前幾個位元組就成立的機制。先前用 flat XML (.fods) 時 LibreOffice 把它誤判成
-    Writer 文件而拒絕轉檔，就是缺了這個訊號。
-    """
-    import zipfile
 
+def build_workbook(path: Path, sample_no: int, report_date: str, staff: list[tuple[str, str, int, float]]) -> None:
+    sst = SharedStrings()
+    sheet1 = build_sheet1(staff, report_date, sample_no, sst)
+    sheet2 = build_sheet2(staff, sst)
+    sheet3 = build_sheet3(sample_no, sst)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(
-            zipfile.ZipInfo("mimetype"),
-            "application/vnd.oasis.opendocument.spreadsheet",
-            compress_type=zipfile.ZIP_STORED,
-        )
-        z.writestr("META-INF/manifest.xml", MANIFEST)
-        z.writestr("content.xml", content_xml)
-        z.writestr("styles.xml", STYLES_XML)
-        z.writestr("settings.xml", SETTINGS_XML)
-        z.writestr("meta.xml", META_XML)
+        z.writestr("[Content_Types].xml", CONTENT_TYPES)
+        z.writestr("_rels/.rels", ROOT_RELS)
+        z.writestr("xl/workbook.xml", WORKBOOK)
+        z.writestr("xl/_rels/workbook.xml.rels", WORKBOOK_RELS)
+        z.writestr("xl/styles.xml", STYLES)
+        z.writestr("xl/sharedStrings.xml", sst.to_xml())
+        z.writestr("xl/worksheets/sheet1.xml", sheet1)
+        z.writestr("xl/worksheets/sheet2.xml", sheet2)
+        z.writestr("xl/worksheets/sheet3.xml", sheet3)
 
 
-#: 三份同型樣本。人員筆數刻意不同（3/4/2），才能驗「重複列區筆數會變」這件事。
+#: 三份同型樣本。人員筆數刻意不同（3/4/2），才驗得到「重複列區筆數會變」。
 SAMPLES = [
     (1, "2026-08-20", [("石牌", "王小明", 8, 92.5), ("石牌", "李大華", 6, 88.0), ("石牌", "陳美玲", 8, 95.0)]),
-    (2, "2026-08-21", [("明德", "張志豪", 8, 90.0), ("明德", "林淑芬", 7, 85.5), ("明德", "黃建國", 8, 97.5), ("明德", "吳佩珊", 4, 78.0)]),
+    (
+        2,
+        "2026-08-21",
+        [("明德", "張志豪", 8, 90.0), ("明德", "林淑芬", 7, 85.5), ("明德", "黃建國", 8, 97.5), ("明德", "吳佩珊", 4, 78.0)],
+    ),
     (3, "2026-08-22", [("天母", "劉俊傑", 8, 93.0), ("天母", "蔡雅婷", 8, 91.5)]),
 ]
 
 
 def main() -> int:
-    if shutil.which("soffice") is None:
-        print("找不到 soffice。fixture 必須由 LibreOffice 產生（AD-002），無法用本專案 renderer 代替。", file=sys.stderr)
-        return 2
-
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        for no, date, staff in SAMPLES:
-            ods = tmp_path / f"duty_roster_sample_{no}.ods"
-            write_ods(ods, build_fods(no, staff, date))
-            proc = subprocess.run(
-                [
-                    "soffice",
-                    "--headless",
-                    "-env:UserInstallation=file://" + str(tmp_path / "loprofile"),
-                    "--convert-to",
-                    "xlsx:Calc MS Excel 2007 XML",
-                    "--outdir",
-                    str(tmp_path),
-                    str(ods),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=180,
-            )
-            produced = tmp_path / f"duty_roster_sample_{no}.xlsx"
-            if proc.returncode != 0 or not produced.exists():
-                print(f"LibreOffice 轉檔失敗 (sample {no}):\n{proc.stdout}\n{proc.stderr}", file=sys.stderr)
-                return 1
-            target = OUT_DIR / produced.name
-            shutil.copy2(produced, target)
-            print(f"產生 {target.relative_to(PROJECT_ROOT)}  ({target.stat().st_size} bytes)")
+    for no, date, staff in SAMPLES:
+        target = OUT_DIR / f"duty_roster_sample_{no}.xlsx"
+        build_workbook(target, no, date, staff)
+        print(f"產生 {target.relative_to(PROJECT_ROOT)}  ({target.stat().st_size} bytes, {len(staff)} 筆人員)")
     return 0
 
 
