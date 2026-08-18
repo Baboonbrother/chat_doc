@@ -18,6 +18,15 @@ from docengine import CONTRACT_SCHEMA_VERSION
 from docengine.core.errors import ContractViolation
 
 
+#: 文件層級的出處欄位：描述「這份 IR 從哪來」，不描述「文件長什麼樣」。
+PROVENANCE_FIELDS: tuple[str, ...] = ("document_id", "source", "metadata")
+
+#: 節點 ``source_ref`` 內的出處欄位。
+#: ``original_index`` 是原始 cellXfs 索引——AD-003 已說明它在 render 後必然重排；
+#: ``path`` 是 XML 元素路徑，會隨寫出的元素順序改變。兩者都不是「文件長什麼樣」。
+SOURCE_REF_PROVENANCE_FIELDS: tuple[str, ...] = ("original_index", "path")
+
+
 class NodeKind(str, enum.Enum):
     """IR 節點種類。
 
@@ -241,7 +250,32 @@ class DocumentIR(BaseModel):
         return canonical_json(self.to_canonical_dict())
 
     def content_hash(self) -> str:
+        """整份 IR 的雜湊，**包含**出處（document_id / source / metadata）。
+
+        用途是完整性：同一個檔案解析兩次要得到同一個雜湊。
+        兩份不同來源檔即使內容一模一樣，這個雜湊也會不同——那是刻意的。
+        """
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+    def structural_hash(self) -> str:
+        """排除出處後的雜湊：只反映文件本身長什麼樣。
+
+        兩個用途：round-trip 可以用它獨立驗證「內容一致」，不必信任 diff 的實作；
+        跨樣本對齊（TPL-002）可以用它一眼看出兩份樣本結構是否相同。
+
+        「什麼算出處」的定義來自模組層級的 ``PROVENANCE_FIELDS`` /
+        ``SOURCE_REF_PROVENANCE_FIELDS``，而 diff 的預設容差也讀同一份定義。
+        兩邊各寫一份的話，只要有人改了其中一邊，這個雜湊與 diff 就會給出互相矛盾的判定。
+        """
+        data = self.to_canonical_dict()
+        for field in PROVENANCE_FIELDS:
+            data.pop(field, None)
+        for node in data.get("nodes", []):
+            ref = node.get("source_ref")
+            if isinstance(ref, dict):
+                for field in SOURCE_REF_PROVENANCE_FIELDS:
+                    ref.pop(field, None)
+        return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
 
     # ------------------------------------------------------------ 契約驗證
 
@@ -365,6 +399,8 @@ def build_style_table(styles: Iterable[Style]) -> dict[str, Style]:
 
 
 __all__ = [
+    "PROVENANCE_FIELDS",
+    "SOURCE_REF_PROVENANCE_FIELDS",
     "NodeKind",
     "ValueType",
     "SourceKind",

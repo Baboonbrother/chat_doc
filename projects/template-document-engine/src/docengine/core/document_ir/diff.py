@@ -14,7 +14,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from docengine.core.document_ir.model import DocumentIR, Node, canonical_json
+from docengine.core.document_ir.model import (
+    PROVENANCE_FIELDS,
+    SOURCE_REF_PROVENANCE_FIELDS,
+    DocumentIR,
+    Node,
+    canonical_json,
+)
 
 
 class DiffKind(str, enum.Enum):
@@ -50,12 +56,11 @@ class Tolerance(BaseModel):
 
     #: 文件層欄位：來源檔名/雜湊/document_id 在 round-trip 兩側必然不同（來源是不同的檔案），
     #: 它們是出處資訊不是內容，忽略不會放過任何內容遺失。
-    ignore_document_fields: tuple[str, ...] = ("document_id", "source", "metadata")
+    #: 預設值直接讀 model 的定義，讓 diff 與 structural_hash 對「什麼算出處」永遠一致。
+    ignore_document_fields: tuple[str, ...] = PROVENANCE_FIELDS
 
-    #: source_ref 內忽略的子欄位。``original_index`` 是原始 styles.xml 的索引，AD-003 已說明
-    #: 它在 render 後必然重排；``path`` 是 XML 元素路徑，會隨我們寫出的元素順序改變。
-    #: part/sheet/cell 仍然比對——那三個才是「這個值在文件的哪裡」。
-    ignore_source_ref_fields: tuple[str, ...] = ("original_index", "path")
+    #: source_ref 內忽略的子欄位。part/sheet/cell 仍然比對——那三個才是「這個值在文件的哪裡」。
+    ignore_source_ref_fields: tuple[str, ...] = SOURCE_REF_PROVENANCE_FIELDS
 
     #: 浮點數比較的絕對容差。0 表示要求完全相等。
     float_abs_tol: float = 0.0
@@ -202,7 +207,13 @@ def _rel_key(rel: dict[str, Any]) -> str:
 
 
 def _unsup_key(item: dict[str, Any]) -> str:
-    return f"{item['part']}::{item['element']}"
+    """未支援登記的比對鍵。
+
+    **必須包含 count**：只用 (part, element) 當鍵，會讓「原本 11 筆富文字、重建後剩 10 筆」
+    這種數量變化完全看不見——實測真實 Excel 檔時就是這樣被漏掉的，
+    靠獨立的結構雜湊才抓出來。
+    """
+    return f"{item['part']}::{item['element']}::{item.get('count', 1)}::{item.get('note') or ''}"
 
 
 def _node_payload(node: Node, tol: Tolerance) -> dict[str, Any]:
