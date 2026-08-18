@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+# artifacts/ 是產出物目錄：節點履歷要進版控（它是證據），其餘中間產物不進。
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/node_ledger.jsonl
