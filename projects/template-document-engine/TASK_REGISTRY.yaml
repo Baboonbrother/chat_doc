@@ -10,14 +10,14 @@ rules:
   - preserve UNKNOWN/REVIEW; never invent certainty
   - DONE requires all acceptance criteria from architecture/acceptance docs plus node-specific tests
 nodes:
-  - {id: FND-001, kind: DETERMINISTIC, status: TODO, deps: [], title: "Define repository and package skeleton"}
-  - {id: FND-002, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define Document IR contract"}
-  - {id: FND-003, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "Define Template Profile contract"}
-  - {id: FND-004, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define Canonical Data contract"}
-  - {id: FND-005, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define evidence and decision record contracts"}
-  - {id: FND-006, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define node execution ledger"}
-  - {id: FND-007, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "Define error taxonomy"}
-  - {id: FND-008, kind: DETERMINISTIC, status: TODO, deps: [FND-001], title: "CLI command shell"}
+  - {id: FND-001, kind: DETERMINISTIC, status: DONE, deps: [], title: "Define repository and package skeleton"}
+  - {id: FND-002, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define Document IR contract"}
+  - {id: FND-003, kind: DETERMINISTIC, status: DONE, deps: [FND-002], title: "Define Template Profile contract"}
+  - {id: FND-004, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define Canonical Data contract"}
+  - {id: FND-005, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define evidence and decision record contracts"}
+  - {id: FND-006, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define node execution ledger"}
+  - {id: FND-007, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "Define error taxonomy"}
+  - {id: FND-008, kind: DETERMINISTIC, status: DONE, deps: [FND-001], title: "CLI command shell"}
   - {id: XLSX-001, kind: DETERMINISTIC, status: TODO, deps: [FND-002], title: "Workbook loader and safety checks"}
   - {id: XLSX-002, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Workbook topology extraction"}
   - {id: XLSX-003, kind: DETERMINISTIC, status: TODO, deps: [XLSX-001], title: "Cell value and datatype extraction"}
