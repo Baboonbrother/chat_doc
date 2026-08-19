@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docengine"
+version = "0.1.0.dev0"
+description = "Template-guided document generation engine (Word/Excel) with deterministic OOXML mechanics and local-LLM semantic inference"
+requires-python = ">=3.11"
+dependencies = [
+    # Contract layer only. OOXML parsing/rendering is stdlib (zipfile + xml.etree).
+    # See DECISIONS.md AD-001 for why openpyxl/python-docx are deliberately not used.
+    "pydantic>=2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "jsonschema>=4"]
+
+[project.scripts]
+docengine = "docengine.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live_llm: requires a reachable local LLM endpoint",
+    "libreoffice: requires the LibreOffice binary to regenerate fixtures",
+]
